@@ -69,5 +69,6 @@ func GetDefaultProxyEndpoint() ProxyEndpoint {
 		AccessFilterUUID:             "default",
 		DefaultSiteOption:            DefaultSite_InternalStaticWebServer,
 		DefaultSiteValue:             "",
+		NodeDefaultSites:             map[string]*NodeDefaultSiteConfig{},
 	}
 }

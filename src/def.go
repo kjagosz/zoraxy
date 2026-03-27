@@ -15,6 +15,7 @@ import (
 
 	"imuslab.com/zoraxy/mod/auth/basicauth"
 	"imuslab.com/zoraxy/mod/auth/sso/oauth2"
+	"imuslab.com/zoraxy/mod/node"
 
 	"imuslab.com/zoraxy/mod/access"
 	"imuslab.com/zoraxy/mod/acme"
@@ -61,6 +62,7 @@ const (
 	LOG_PREFIX                   = "zr"
 	LOG_EXTENSION                = ".log"
 	STATISTIC_AUTO_SAVE_INTERVAL = 600 /* Seconds */
+	NODE_CONFIG_UPDATE_INTERVAL  = 1   /* Minutes */
 )
 
 /* System Startup Flags */
@@ -101,11 +103,16 @@ var (
 	geoDbUpdate       = flag.Bool("update_geoip", false, "Download the latest GeoIP data and exit")
 	development_build = flag.Bool("dev", false, "Use external web folder for UI development and enable verbose logging")
 	reset_account     = flag.Bool("reset_ac", false, "Reset admin account username and password to default and exit")
+	nodeToken         = flag.String("token", "", "Token for node registration")
+	nodeServer        = flag.String("server", "", "Server URL for node registration")
+	nodeIP            = flag.String("nodeIP", "", "Advertised node management IP reported to primary node, leave empty to auto-detect")
+	nodeSyncTimeout   = flag.Duration("node_sync_timeout", 30*time.Second, "Timeout for worker node sync HTTP requests to primary")
 )
 
 /* Global Variables and Handlers */
 var (
 	/* System */
+	mode        = func() *string { v := "primary"; return &v }()
 	nodeUUID    = "generic" //System uuid in uuidv4 format, load from database on startup
 	bootTime    = time.Now().Unix()
 	requireAuth = true //Require authentication for webmin panel, override from flag
@@ -116,6 +123,7 @@ var (
 	CONF_FOLDER                string //Configuration folder path
 	CONF_HTTP_PROXY            string //HTTP proxy configuration path
 	CONF_STREAM_PROXY          string //Stream proxy configuration path
+	CONF_NODES                 string //Nodesy configuration path
 	CONF_CERT_STORE            string //Certificate store path
 	CONF_REDIRECTION           string //Redirection configuration path
 	CONF_ACCESS_RULE           string //Access rule configuration path
@@ -141,6 +149,7 @@ var (
 	sysdb          *database.Database              //System database
 	authAgent      *auth.AuthAgent                 //Authentication agent
 	tlsCertManager *tlscert.Manager                //TLS / SSL management
+	nodeManager    *node.Manager                   //TLS / SSL management
 	redirectTable  *redirection.RuleTable          //Handle special redirection rule sets
 	webminPanelMux *http.ServeMux                  //Server mux for handling webmin panel APIs
 	csrfMiddleware func(http.Handler) http.Handler //CSRF protection middleware
@@ -163,6 +172,9 @@ var (
 
 	//Plugin auth related
 	pluginApiKeyManager *auth.APIKeyManager //API key manager for plugin authentication
+
+	// Node auth related
+	nodeApiKeyManager *auth.APIKeyManager //API key manager for node authentication
 
 	//Authentication Provider
 	basicAuthManager  *basicauth.Manager   // Basic Auth manager for global basic auth users and groups

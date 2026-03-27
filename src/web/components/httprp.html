@@ -1,7 +1,11 @@
-<div class="standardContainer">
+<div class="standardContainer nodeWriteProtectedScope" id="httprpPage">
     <div class="ui basic segment">
         <h2>HTTP Proxy</h2>
         <p>Proxy HTTP server with HTTP or HTTPS for multiple hosts. If you are only proxying for one host / domain, use Default Site instead.</p>
+    </div>
+    <div class="ui warning message nodeWriteLockNotice" style="display:none;">
+        <div class="header">Managed by Primary Node</div>
+        <p>HTTP proxy changes are locked on worker nodes until Emergency Local Override is enabled in Status.</p>
     </div>
     <style>
         #httpProxyList .ui.toggle.checkbox input:checked ~ label::before{
@@ -231,6 +235,7 @@
                     <th class="details-view">Alt. Listening Addr</th>
                     <th>Destination</th>
                     <th class="details-view">Authentication</th>
+                    <th class="details-view hideInNodeMode">Node</th>
                     <th>Virtual Directory</th>
                     <th class="no-sort">Tags</th>
                     <th class="no-sort" style="width:100px; cursor: default !important;"></th>
@@ -340,7 +345,14 @@
                                     <i class="ui plus icon"></i>
                                 </button>
                             </div>
-
+                            <div class="ui divider"></div>
+                            <div class="hideInNodeMode">
+                                <b>Assigned Node</b>
+                                <p style="margin-top: 0.4em;"><small>Select which node should serve this hostname. Leave on primary to keep it local.</small></p>
+                                <div class="listen_mode" style="margin-top:0.4em;">
+                                    <!-- Node assignment will be populated here -->
+                                </div>
+                            </div>
                         </div>
                     </div>
                     <!-- Destinations -->
@@ -489,29 +501,8 @@
                                     </div>
                                 </div>
                             </div>
-                            <div class="field basicAuthGroupField" style="display:none; margin-top: 1em;">
-                                <label>Basic Auth Groups</label>
-                                <div class="ui segment basicAuthGroupList" style="max-height: 180px; overflow-y: auto;"></div>
-                                <small>Select which Basic Auth groups can access this host.</small>
-                                <div style="margin-top: 0.6em;">
-                                    <button type="button" class="ui basic mini button openBasicAuthManagerBtn"><i class="ui users icon"></i> Manage Users & Groups</button>
-                                </div>
-                            </div>
-                            <div class="field oauth2TenantField" style="display:none; margin-top: 1em;">
-                                <label>OAuth2 Tenant</label>
-                                <div class="ui fluid selection dropdown oauth2TenantDropdown">
-                                    <input type="hidden" name="oauth2TenantId" value="default">
-                                    <i class="dropdown icon"></i>
-                                    <div class="default text">Default</div>
-                                    <div class="menu"></div>
-                                </div>
-                                <small>Select which OAuth2 tenant protects this host. Existing routes without an explicit tenant use the default tenant.</small>
-                            </div>
-                            <div class="field oauth2ClaimsField" style="display:none;">
-                                <textarea class="OAuth2RequiredClaims" rows="5" style="display:none;"></textarea>
-                            </div>
                             <br>
-                            <button class="ui basic compact small button editOAuth2ClaimsBtn" style="display:none; margin-left: 0.4em; margin-top: 0.4em;"><i class="ui violet tasks icon"></i> OAuth2 Claim Rules</button>
+                            <button class="ui basic compact small button editBasicAuthCredentialsBtn" style="margin-left: 0.4em; margin-top: 0.4em;"><i class="ui blue user circle icon"></i> Basic Auth Credentials</button>
                             <div class="ui divider"></div>
                             <!-- Block Common Exploits -->
                             <label><b>Exploits Prevention</b></label>
@@ -715,20 +706,21 @@
     /* List all proxy endpoints */
     function listProxyEndpoints(){
         $.get("/api/proxy/list?type=host", function(data){
-            $("#httpProxyList").html(``);
-            if (data.error !== undefined){
+            loadAssignableNodes(function(){
+                $("#httpProxyList").html(``);
+                if (data.error !== undefined){
+                        $("#httpProxyList").append(`<tr>
+                        <td data-label="" colspan="9"><i class="remove icon"></i> ${data.error}</td>
+                    </tr>`);
+                }else if (data.length == 0){
                     $("#httpProxyList").append(`<tr>
-                    <td data-label="" colspan="9"><i class="remove icon"></i> ${data.error}</td>
-                </tr>`);
-            }else if (data.length == 0){
-                $("#httpProxyList").append(`<tr>
-                    <td data-label="" colspan="9"><i class="green check circle icon"></i> No HTTP Proxy Record</td>
-                </tr>`);
-            }else{
-                //Sort by RootOrMatchingDomain field
-                data.sort((a,b) => (a.RootOrMatchingDomain > b.RootOrMatchingDomain) ? 1 : ((b.RootOrMatchingDomain > a.RootOrMatchingDomain) ? -1 : 0))
-                httpProxyList = data;
-                data.forEach(subd => {
+                        <td data-label="" colspan="9"><i class="green check circle icon"></i> No HTTP Proxy Record</td>
+                    </tr>`);
+                }else{
+                    //Sort by RootOrMatchingDomain field
+                    data.sort((a,b) => (a.RootOrMatchingDomain > b.RootOrMatchingDomain) ? 1 : ((b.RootOrMatchingDomain > a.RootOrMatchingDomain) ? -1 : 0))
+                    httpProxyList = data;
+                    data.forEach(subd => {
                     let subdData = encodeURIComponent(JSON.stringify(subd));
                     
                     //Build the upstream list
@@ -818,14 +810,14 @@
                     } else if (subd.AuthenticationProvider.AuthMethod == 0x2) {
                         authDisplay = `<i class="ui blue key icon"></i> Forward Auth`;
                     } else if (subd.AuthenticationProvider.AuthMethod == 0x3) {
-                        const oauth2TenantId = subd.AuthenticationProvider.OAuth2TenantID || "default";
-                        authDisplay = `<i class="ui yellow key icon"></i> OAuth2 <small style="opacity:0.7;">(${oauth2TenantId})</small>`;
+                        authDisplay = `<i class="ui yellow key icon"></i> OAuth2`;
                     } else if (subd.AuthenticationProvider.AuthMethod == 0x4) {
                         authDisplay = `<i class="ui purple key icon"></i> Zoraxy Auth`;
                     } else {
                         authDisplay = `<small style="opacity: 0.3; pointer-events: none; user-select: none;">None</small>`;
                     }
                     let authDisplayEmpty = (subd.AuthenticationProvider.AuthMethod == 0x0);
+                    let assignedNodeDisplay = getAssignedNodeLabel(subd.AssignedNodeID, true);
                     
                     $("#httpProxyList").append(`<tr eptuuid="${subd.RootOrMatchingDomain}" payload="${subdData}" class="subdEntry">
                         <td class="collapsing ignoremw" datatype="enable">
@@ -850,6 +842,9 @@
                         <td data-label="auth" datatype="auth" class="details-view" style="${authDisplayEmpty?"text-align: center;":""}">
                             ${authDisplay}
                         </td>
+                        <td data-label="node" datatype="node" class="details-view hideInNodeMode">
+                            ${assignedNodeDisplay}
+                        </td>
                         <td data-label="" editable="true" datatype="vdir" style="${vdIsEmpty?"text-align: center;":""}">${vdList}</td>
                         <td data-label="tags" payload="${encodeURIComponent(JSON.stringify(subd.Tags))}" datatype="tags" style="${tagListEmpty?"text-align: center;":""}">
                             <div class="tags-list">
@@ -870,12 +865,15 @@
                             <button title="Remove Proxy Rule" class="ui circular mini red basic icon button inlineEditActionBtn" onclick='deleteEndpoint("${(subd.RootOrMatchingDomain).hexEncode()}")'><i class="trash icon"></i></button>
                         </td>
                     </tr>`);
-                });
-                populateTagFilterDropdown(data);
-            }
+                    });
+                    populateTagFilterDropdown(data);
+                }
 
-            resolveAccessRuleNameOnHostRPlist();
-            initDetailView();
+                resolveAccessRuleNameOnHostRPlist();
+                initDetailView();
+                applyNodeModeVisibility($("#httpProxyTableWrapper"));
+                applyNodeWriteLockState($("#httprpPage"));
+            });
         });
     }
 
@@ -968,138 +966,7 @@
         resolveAccessRuleNameOnHostRPlist();
     }
 
-    function loadOAuth2TenantsForProxyEditor(callback){
-        $.cjax({
-            url: '/api/sso/OAuth2/tenants',
-            method: 'GET',
-            dataType: 'json',
-            success: function(data) {
-                let tenants = Array.isArray(data) && data.length > 0 ? data : [{
-                    id: "default",
-                    name: "Default",
-                    isDefault: true
-                }];
-                callback(tenants);
-            },
-            error: function() {
-                callback([{
-                    id: "default",
-                    name: "Default",
-                    isDefault: true
-                }]);
-            }
-        });
-    }
-
-    function loadBasicAuthGroupsForProxyEditor(callback){
-        $.cjax({
-            url: '/api/basicauth/groups/list',
-            method: 'GET',
-            dataType: 'json',
-            success: function(data) {
-                let groups = Array.isArray(data) && data.length > 0 ? data : [{
-                    id: "default",
-                    name: "Default",
-                    is_default: true
-                }];
-                callback(groups);
-            },
-            error: function() {
-                callback([{
-                    id: "default",
-                    name: "Default",
-                    is_default: true
-                }]);
-            }
-        });
-    }
-
-    function getSelectedBasicAuthGroupIDs(container){
-        return $(container).find("input[name='basicAuthGroupIds']:checked").map(function(){
-            return $(this).val();
-        }).get();
-    }
-
-    function populateBasicAuthGroupChecklist(editor, selectedGroupIDs, onChange){
-        loadBasicAuthGroupsForProxyEditor(function(groups){
-            const groupList = editor.find(".basicAuthGroupList");
-            const selectedSet = new Set((selectedGroupIDs || []).map(function(groupID){
-                return String(groupID);
-            }));
-            let html = "";
-            groups.forEach(function(group){
-                const checked = selectedSet.has(String(group.id)) ? "checked" : "";
-                const hostInfo = (group.host_count || 0) > 0 ? ` <small style="opacity:0.7;">(${group.host_count} host${group.host_count === 1 ? "" : "s"})</small>` : "";
-                const escapedGroupId = $("<div>").text(group.id || "").html();
-                const escapedGroupName = $("<div>").text(group.name || "").html();
-                html += `<div class="field">
-                    <div class="ui checkbox">
-                        <input type="checkbox" name="basicAuthGroupIds" value="${escapedGroupId}" ${checked}>
-                        <label>${escapedGroupName}${hostInfo}</label>
-                    </div>
-                </div>`;
-            });
-            groupList.html(html);
-            groupList.find(".ui.checkbox").checkbox({
-                onChange: function() {
-                    if (onChange) {
-                        onChange(getSelectedBasicAuthGroupIDs(groupList));
-                    }
-                }
-            });
-        });
-    }
-
-    function updateOAuth2TenantFieldVisibility(editor){
-        const authProviderType = editor.find(".authProviderPicker input[type='radio']:checked").val();
-        const isBasicAuth = authProviderType == "1";
-        const isOAuth2 = authProviderType == "3";
-        editor.find(".basicAuthGroupField").toggle(isBasicAuth);
-        editor.find(".oauth2TenantField").toggle(isOAuth2);
-        editor.find(".oauth2ClaimsField").hide();
-        editor.find(".editOAuth2ClaimsBtn").toggle(isOAuth2);
-    }
-
-    function formatOAuth2RequiredClaims(requirements){
-        if (!Array.isArray(requirements) || requirements.length === 0) {
-            return "";
-        }
-
-        return requirements.map(function(requirement) {
-            const claim = (requirement && requirement.Claim) ? requirement.Claim : "";
-            const values = (requirement && Array.isArray(requirement.Values)) ? requirement.Values.join(",") : "";
-            return values ? `${claim}=${values}` : claim;
-        }).filter(function(line) {
-            return line.trim() !== "";
-        }).join("\n");
-    }
-
-    function populateOAuth2TenantDropdown(editor, selectedTenantId, onChange){
-        loadOAuth2TenantsForProxyEditor(function(tenants){
-            const menu = editor.find(".oauth2TenantDropdown .menu");
-            let initializing = true;
-            menu.empty();
-            tenants.forEach(function(tenant) {
-                const label = tenant.isDefault ? `${tenant.name} (${tenant.id})` : tenant.name;
-                menu.append(`<div class="item" data-value="${tenant.id}">${label}</div>`);
-            });
-
-            editor.find(".oauth2TenantDropdown").dropdown('destroy');
-            editor.find(".oauth2TenantDropdown").dropdown({
-                onChange: function() {
-                    updateOAuth2TenantFieldVisibility(editor);
-                    if (!initializing && onChange) {
-                        onChange();
-                    }
-                }
-            });
-            editor.find(".oauth2TenantDropdown").dropdown('set selected', selectedTenantId || "default");
-            initializing = false;
-            updateOAuth2TenantFieldVisibility(editor);
-        });
-    }
-
-
+    
     /*
         Inline editor for httprp.html
     */
@@ -1236,6 +1103,14 @@
         });
     }
 
+    function updateNodesList(uuid, assignedNodeID){
+        let editor = $("#httprpEditModalWrapper");
+        renderAssignedNodeDropdown(editor.find(".listen_mode"), assignedNodeID, function(){
+            saveProxyInlineEdit(uuid);
+        }, true);
+        applyNodeModeVisibility(editor);
+    }
+
     function saveProxyInlineEdit(uuid){
         let editor = $("#httprpEditModal");
         
@@ -1254,9 +1129,7 @@
         let blockCommonExploits = $(editor).find(".BlockCommonExploits")[0].checked;
         let blockAICrawlers = $(editor).find(".BlockAICrawlers")[0].checked;
         let mitigationAction = $(editor).find(".mitigationActionDropdown").dropdown("get value");
-        let oauth2TenantId = $(editor).find(".oauth2TenantDropdown input[name='oauth2TenantId']").val() || "default";
-        let oauth2RequiredClaims = $(editor).find(".OAuth2RequiredClaims").val() || "";
-        let basicAuthGroupIds = JSON.stringify(getSelectedBasicAuthGroupIDs($(editor).find(".basicAuthGroupList")));
+        let assignedNodeId = $(editor).find(".listen_mode input[name='assignedNodeId']").val() || "";
 
         // CAPTCHA Gating
         let requireCaptcha = $(editor).find(".RequireCaptcha")[0].checked;
@@ -1290,9 +1163,7 @@
                 "blockCommonExploits": blockCommonExploits,
                 "blockAICrawlers": blockAICrawlers,
                 "mitigationAction": mitigationAction,
-                "oauth2TenantId": oauth2TenantId,
-                "oauth2RequiredClaims": oauth2RequiredClaims,
-                "basicAuthGroupIds": basicAuthGroupIds,
+                "assignedNodeId": assignedNodeId,
                 "ratenum" :rateLimit,
                 "captcha": requireCaptcha,
                 "captchaProvider": captchaProvider,
@@ -1349,14 +1220,6 @@
             ep: uuid
         }));
         showEditorSideWrapper("snippet/basicAuthEditor.html?t=" + Date.now() + "#" + payload);
-    }
-
-    function editOAuth2ClaimRequirements(uuid){
-        let payload = encodeURIComponent(JSON.stringify({
-            ept: "host",
-            ep: uuid
-        }));
-        showEditorSideWrapper("snippet/oauth2ClaimsEditor.html?t=" + Date.now() + "#" + payload);
     }
 
 
@@ -1812,6 +1675,8 @@
             editor.find(".downstream_primary_hostname_edit_input").hide();
             editor.find(".downstream_primary_hostname_edit_btn").parent().show();
         });
+
+        updateNodesList(uuid, subd.AssignedNodeID || "");
         editor.find(".saveDownstreamHostnameBtn").off("click").on("click", function(){
             let newHostname = editor.find(".downstream_primary_hostname_edit_input input").val().trim();
             if (newHostname.length == 0){
@@ -1999,27 +1864,13 @@
             break;
         }
 
-        populateOAuth2TenantDropdown(editor, subd.AuthenticationProvider.OAuth2TenantID || "default", function() {
-            saveProxyInlineEdit(uuid);
-        });
-        populateBasicAuthGroupChecklist(editor, subd.AuthenticationProvider.BasicAuthGroupIDs || [], function() {
-            if (editor.find(".authProviderPicker input[type='radio']:checked").val() == "1") {
-                saveProxyInlineEdit(uuid);
-            }
-        });
-        editor.find(".OAuth2RequiredClaims").val(formatOAuth2RequiredClaims(subd.AuthenticationProvider.OAuth2RequiredClaims));
-
         editor.find(".authProviderPicker input[type='radio']").off("change").on("change", function() {
-            updateOAuth2TenantFieldVisibility(editor);
             saveProxyInlineEdit(uuid);
         });
-        editor.find(".openBasicAuthManagerBtn").off("click").on("click", function() {
-            openTabById("basicauth");
+
+        editor.find(".editBasicAuthCredentialsBtn").off("click").on("click", function(){
+            editBasicAuthCredentials(uuid);
         });
-        editor.find(".editOAuth2ClaimsBtn").off("click").on("click", function(){
-            editOAuth2ClaimRequirements(uuid);
-        });
-        updateOAuth2TenantFieldVisibility(editor);
 
         //Rate limit
         if (subd.RequireRateLimit) {
@@ -2308,6 +2159,9 @@
             //Reset the tag filter
             $("#tagFilterDropdown").dropdown('set selected', "");
         }
+        applyNodeWriteLockState($("#httprpPage"), {}, true);
     }
+    applyNodeModeVisibility($("#httprpEditModalWrapper"), true);
+    applyNodeWriteLockState($("#httprpPage"));
         
 </script>
