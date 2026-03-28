@@ -378,6 +378,7 @@
     });
 
     $('.basicAuthTabs .item').tab();
+    applyNodeWriteLockState($("#basicAuthPage"));
     resetBasicAuthGroupForm();
     resetBasicAuthUserForm();
     loadBasicAuthGroups(function(){

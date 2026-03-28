@@ -579,6 +579,11 @@ func importNodeSystemData(snapshot *node.SystemSnapshot) error {
 	if err := restorePreservedLocalNodeSettings(preservedLocalSettings); err != nil {
 		return err
 	}
+	if basicAuthManager != nil {
+		if err := basicAuthManager.Reload(); err != nil {
+			return err
+		}
+	}
 
 	if err := importNodeRedirectRules(snapshot.RedirectRules); err != nil {
 		return err

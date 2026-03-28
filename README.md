@@ -101,6 +101,10 @@ The installation method is same as Linux. For other ARM SBCs, please refer to yo
 
 See the [/docker](https://github.com/tobychui/zoraxy/tree/main/docker) folder for more details.
 
+The published Docker images are split into:
+- `zoraxydocker/zoraxy:latest` or `:vX.Y.Z` for the standard image
+- `zoraxydocker/zoraxy:latest-zerotier` or `:vX.Y.Z-zerotier` for the bundled ZeroTier variant
+
 ### Start Parameters
 
 ```

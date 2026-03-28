@@ -62,13 +62,13 @@ func RegisterBasicAuthAPIs(authRouter *auth.RouterDef) {
 	}
 
 	authRouter.HandleFunc("/api/basicauth/groups/list", basicAuthManager.HandleGroupList)
-	authRouter.HandleFunc("/api/basicauth/groups/create", basicAuthManager.HandleGroupCreate)
-	authRouter.HandleFunc("/api/basicauth/groups/update", basicAuthManager.HandleGroupUpdate)
-	authRouter.HandleFunc("/api/basicauth/groups/delete", basicAuthManager.HandleGroupDelete)
+	authRouter.HandleFunc("/api/basicauth/groups/create", wrapNodeConfigMutation(basicAuthManager.HandleGroupCreate))
+	authRouter.HandleFunc("/api/basicauth/groups/update", wrapNodeConfigMutation(basicAuthManager.HandleGroupUpdate))
+	authRouter.HandleFunc("/api/basicauth/groups/delete", wrapNodeConfigMutation(basicAuthManager.HandleGroupDelete))
 	authRouter.HandleFunc("/api/basicauth/users/list", basicAuthManager.HandleUserList)
-	authRouter.HandleFunc("/api/basicauth/users/create", basicAuthManager.HandleUserCreate)
-	authRouter.HandleFunc("/api/basicauth/users/update", basicAuthManager.HandleUserUpdate)
-	authRouter.HandleFunc("/api/basicauth/users/delete", basicAuthManager.HandleUserDelete)
+	authRouter.HandleFunc("/api/basicauth/users/create", wrapNodeConfigMutation(basicAuthManager.HandleUserCreate))
+	authRouter.HandleFunc("/api/basicauth/users/update", wrapNodeConfigMutation(basicAuthManager.HandleUserUpdate))
+	authRouter.HandleFunc("/api/basicauth/users/delete", wrapNodeConfigMutation(basicAuthManager.HandleUserDelete))
 }
 
 func resolveBasicAuthGroupNames(groupIDs []string) []string {
