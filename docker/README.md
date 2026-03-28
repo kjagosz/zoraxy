@@ -13,6 +13,10 @@ In the examples below, make sure to update `/path/to/zoraxy/config/`. If a path 
 
 Once setup, access the webui at `http://<host-ip>:8000` to configure Zoraxy. Change the port in the URL if you changed the management port.
 
+Docker image variants:
+- `zoraxydocker/zoraxy:latest` or `:vX.Y.Z` for the standard image
+- `zoraxydocker/zoraxy:latest-zerotier` or `:vX.Y.Z-zerotier` when you need the bundled ZeroTier binary
+
 ### Docker Run
 
 ```
@@ -151,12 +155,15 @@ Variables are the same as those in [Start Parameters](https://github.com/tobychu
 | `UPDATE_GEOIP` | `false` (Boolean) | Download the latest GeoIP data and exit. |
 | `VERSION` | `false` (Boolean) | Show version of this server. |
 | `WEBROOT` | `./www` (String) | Static web server root folder. Only allow change in start parameters. |
-| `ZEROTIER` | `false` (Boolean) | Enable ZeroTier functionality for GAN. |
+| `ZEROTIER` | `false` (Boolean) | Enable ZeroTier functionality for GAN. Use the `-zerotier` image or mount a local binary. |
+| `ZEROTIER_BIN` | `/usr/local/bin/zerotier-one` (String) | Path or command name of a ZeroTier binary to run when `ZEROTIER=true`. |
 
 > [!IMPORTANT]
 > Contrary to the Zoraxy README, Docker usage of the port flag should NOT include the colon. Ex: `-e PORT="8000"` for Docker run and `PORT: "8000"` for Docker compose.
 
 ### ZeroTier
+
+Use the `zoraxydocker/zoraxy:latest-zerotier` image if you want ZeroTier bundled into the container. If you prefer to keep using the standard image, mount a local ZeroTier binary and point `ZEROTIER_BIN` at it.
 
 If you are running with ZeroTier, make sure to add the following flags to ensure ZeroTier functionality:
   
@@ -181,5 +188,5 @@ To build the Docker image:
   - Check out the repository/branch.
   - Copy the Zoraxy `src/` directory into the `docker/` (here) directory.
   - Run the build command with `docker build -t zoraxy_build .`
-  - You can now use the image `zoraxy_build`
-    - If you wish to change the image name, then modify`zoraxy_build` in the previous step and then build again.
+  - For the ZeroTier variant, run `docker build -f Dockerfile.zerotier --build-arg ZORAXY_BASE_IMAGE=zoraxy_build -t zoraxy_build_zerotier .`
+  - You can now use `zoraxy_build` for the standard image or `zoraxy_build_zerotier` for the bundled ZeroTier variant.

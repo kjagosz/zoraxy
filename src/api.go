@@ -139,8 +139,11 @@ func RegisterTLSAPIs(authRouter *auth.RouterDef) {
 func RegisterAuthenticationHandlerAPIs(authRouter *auth.RouterDef) {
 	authRouter.HandleFunc("/api/sso/forward-auth", forwardAuthRouter.HandleAPIOptions)
 	authRouter.HandleFunc("/api/sso/OAuth2", wrapNodeConfigMutation(oauth2Router.HandleSetOAuth2Settings))
+	authRouter.HandleFunc("/api/sso/OAuth2/tenants", wrapNodeConfigMutation(oauth2Router.HandleTenantListAPI))
+	authRouter.HandleFunc("/api/sso/OAuth2/tenant", wrapNodeConfigMutation(oauth2Router.HandleTenantAPI))
 	authRouter.HandleFunc("/api/sso/zorxauth/provider", zorxAuthRouter.HandleAuthProviderSettings)
 	authRouter.HandleFunc("/api/sso/zorxauth/gateway", zorxAuthRouter.HandleGatewaySettings)
+	authRouter.HandleFunc("/api/basicauth/groups/options", handleBasicAuthGroupOptions)
 }
 
 // Register ZorxAuth user management APIs separately from generic SSO provider settings routes
@@ -429,6 +432,7 @@ func initAPIs(targetMux *http.ServeMux) {
 	RegisterHTTPProxyAPIs(authRouter)
 	RegisterTLSAPIs(authRouter)
 	RegisterAuthenticationHandlerAPIs(authRouter)
+	RegisterBasicAuthAPIs(authRouter)
 	RegisterZorxAuthUserManagementAPIs(authRouter)
 	RegisterRedirectionAPIs(authRouter)
 	RegisterAccessRuleAPIs(authRouter)

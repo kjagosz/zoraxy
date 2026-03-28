@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/netip"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"imuslab.com/zoraxy/mod/access"
 	"imuslab.com/zoraxy/mod/acme"
 	"imuslab.com/zoraxy/mod/auth"
+	"imuslab.com/zoraxy/mod/auth/basicauth"
 	"imuslab.com/zoraxy/mod/auth/sso/forward"
 	"imuslab.com/zoraxy/mod/auth/sso/oauth2"
 	"imuslab.com/zoraxy/mod/auth/sso/zorxauth"
@@ -231,11 +233,20 @@ func startupSequence() {
 	})
 
 	oauth2Router = oauth2.NewOAuth2Router(&oauth2.OAuth2RouterOptions{
-		Logger:   SystemWideLogger,
-		Database: sysdb,
+		Logger:             SystemWideLogger,
+		Database:           sysdb,
+		TenantUsageChecker: listOAuth2TenantUsers,
 	})
 
-	zorxAuthRouter = zorxauth.NewAuthRouter(sysdb, SystemWideLogger)
+	zorxAuthRouter = zorxauth.NewAuthRouter(sysdb, SystemWideLogger, filepath.Join(CONF_FOLDER, "sso", "zorxauth"))
+	basicAuthManager, err = basicauth.NewManager(&basicauth.Options{
+		Database:          sysdb,
+		Logger:            SystemWideLogger,
+		GroupUsageChecker: listBasicAuthGroupUsers,
+	})
+	if err != nil {
+		panic(err)
+	}
 
 	//Create a statistic collector
 	statisticCollector, err = statistic.NewStatisticCollector(statistic.CollectorOption{
