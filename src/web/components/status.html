@@ -276,6 +276,9 @@
         if (data.state === "local_override"){
             stateClass = "orange";
             headline = "Local override enabled; primary sync is paused";
+        }else if (data.state === "approval_pending"){
+            stateClass = "yellow";
+            headline = "Node registration is waiting for approval on the primary node";
         }else if (data.state === "primary_unreachable"){
             stateClass = "red";
             if (data.has_previous_sync){
@@ -461,6 +464,8 @@
                 renderNodeSyncStatus(data);
                 if (data.state === "local_override"){
                     msgbox("Local override is enabled, so configuration import is paused", false, 5000);
+                }else if (data.state === "approval_pending"){
+                    msgbox("Node registration is still waiting for approval on the primary node", false, 5000);
                 }else{
                     msgbox("Node synchronization completed");
                 }

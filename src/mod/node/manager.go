@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,14 +26,23 @@ type Node struct {
 	Name           string    `json:"name,omitempty"`
 	Host           string    `json:"host"`
 	LastIP         string    `json:"last_ip,omitempty"`
+	RequestIP      string    `json:"request_ip,omitempty"`
 	ManagementPort string    `json:"management_port,omitempty"`
 	Enabled        bool      `json:"enabled"`
 	LocalOverride  bool      `json:"local_override,omitempty"`
 	Token          string    `json:"token"`
 	RegisteredAt   time.Time `json:"registered_at" `
+	ApprovedAt     time.Time `json:"approved_at,omitempty"`
+	ApprovalStatus string    `json:"approval_status,omitempty"`
 	LastSeen       time.Time `json:"last_seen"`
 	ZoraxyVersion  string    `json:"zoraxy_version"`
 	ConfigVersion  string    `json:"config_version"`
+}
+
+type JoinInstruction struct {
+	ID      string `json:"id,omitempty"`
+	Title   string `json:"title,omitempty"`
+	Content string `json:"content"`
 }
 
 type Options struct {
@@ -66,6 +76,7 @@ type Options struct {
 	ExportSystemData          func() (*SystemSnapshot, error)
 	ExportSystemDataForNode   func(*Node) (*SystemSnapshot, error)
 	ImportSystemData          func(*SystemSnapshot) error
+	BuildJoinInstructions     func(*http.Request, *Node) ([]*JoinInstruction, error)
 }
 
 type Manager struct {
@@ -108,6 +119,10 @@ func NewManager(sysdb *database.Database, options *Options) (*Manager, error) {
 		if err != nil {
 			options.Logger.PrintAndLog("nodes", "Unmarshal node config failed", err)
 			continue
+		}
+		thisRelayConfig.ApprovalStatus = normalizeNodeApprovalStatus(thisRelayConfig.ApprovalStatus)
+		if thisRelayConfig.IsApproved() && thisRelayConfig.ApprovedAt.IsZero() {
+			thisRelayConfig.ApprovedAt = thisRelayConfig.RegisteredAt
 		}
 		if !bytes.Contains(configBytes, []byte(`"enabled"`)) {
 			thisRelayConfig.Enabled = true
@@ -586,6 +601,9 @@ func (m *Manager) GetNodeByID(NodeID string) (*Node, error) {
 func (m *Manager) GetNodeByToken(token string) (*Node, error) {
 	for _, Node := range m.Nodes {
 		if Node.Token == token {
+			if Node.IsPendingApproval() {
+				return nil, ErrNodeApprovalPending
+			}
 			return Node, nil
 		}
 	}
@@ -603,11 +621,13 @@ func (m *Manager) GetNodeByHost(host string) (*Node, error) {
 
 func (m *Manager) GenerateJoinRequest(name string) (*Node, error) {
 	node := &Node{
-		ID:           uuid.New().String(),
-		Name:         strings.TrimSpace(name),
-		Enabled:      true,
-		Token:        generateNodeToken(),
-		RegisteredAt: time.Now(),
+		ID:             uuid.New().String(),
+		Name:           strings.TrimSpace(name),
+		Enabled:        true,
+		Token:          generateNodeToken(),
+		RegisteredAt:   time.Now(),
+		ApprovedAt:     time.Now(),
+		ApprovalStatus: NodeApprovalStatusApproved,
 	}
 	if err := m.RegisterNode(node); err != nil {
 		return nil, err
@@ -617,7 +637,7 @@ func (m *Manager) GenerateJoinRequest(name string) (*Node, error) {
 
 func (m *Manager) CleanupJoinRequests() {
 	for _, node := range m.Nodes {
-		if node.RegisteredAt.Add(time.Hour * 24).Before(time.Now()) {
+		if node.IsPendingApproval() && node.RegisteredAt.Add(time.Hour*24).Before(time.Now()) {
 			err := m.UnregisterNode(node)
 			if err != nil {
 				m.logf("Failed to cleanup join request", err)

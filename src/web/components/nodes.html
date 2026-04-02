@@ -19,6 +19,11 @@
       <div class="header">Node Version Compatibility</div>
       <p id="nodeVersionMismatchWarningText" style="margin-bottom: 0;"></p>
     </div>
+    <div id="dynamicNodeEnrollmentBox" class="ui message" style="display:none;">
+      <div class="header">Dynamic Enrollment Endpoint</div>
+      <p>Request a pending worker token from a new host. The token is blocked until you approve the node in this page.</p>
+      <pre id="dynamicNodeEnrollmentCommand" style="margin-bottom: 0;"></pre>
+    </div>
 
     <div class="ui basic segment advanceoptions">
       <div class="ui accordion advanceSettings">
@@ -93,48 +98,24 @@
             <div class="header">Selected Node</div>
             <p id="nodeInfoDetails"></p>
         </div>
-        <div class="ui inverted message" style="margin-top: 0.6em;">
-            <div class="header">Docker instructions (ENV)</div>
-            <p>
-            <pre id="dockerJoinEnvCommand"></pre>
-            </p>
-        </div>
-        <br>
-        <div class="ui inverted message" style="margin-top: 0.6em;">
-            <div class="header">Docker instructions (flags)</div>
-            <p>
-            <pre id="dockerJoinFlagCommand"></pre>
-            </p>
-        </div>
-        <br>
-        <div class="ui inverted message" style="margin-top: 0.6em;">
-            <div class="header">Standalone instructions (ENV)</div>
-            <p>
-            <pre id="standaloneJoinEnvCommand"></pre>
-            </p>
-        </div>
-        <br>
-        <div class="ui inverted message" style="margin-top: 0.6em;">
-            <div class="header">Standalone instructions (flags)</div>
-            <p>
-            <pre id="standaloneJoinFlagCommand"></pre>
-            </p>
-        </div>
-        <br>
-        <div class="ui inverted message" style="margin-top: 0.6em;">
-            <div class="header">Optional advertised IP override</div>
-            <p>
-            <pre id="nodeIPJoinCommand"></pre>
-            </p>
-        </div>
+        <div id="nodeJoinInstructions"></div>
         <small>If the primary node cannot open the worker admin panel with the auto-detected address, add either `ZORAXY_NODE_IP=&lt;worker-accessible-ip&gt;` or `-nodeIP &lt;worker-accessible-ip&gt;` to the worker start command.</small>
     </div>
 </div>
+<template id="nodeJoinInstructionTemplate">
+    <div class="ui inverted message" style="margin-top: 0.6em;">
+        <div class="header nodeJoinInstructionTitle"></div>
+        <p>
+        <pre class="nodeJoinInstructionBody"></pre>
+        </p>
+    </div>
+</template>
 
 <script>
 $(".advanceSettings").accordion();
 $("#requireNodeVersionMatchCheckbox").checkbox();
 let nodeFleetSettings = {};
+const NODE_JOIN_TEMPLATES_API = "/api/nodes/join/templates";
 
 function loadPluginUIContextIfAvailable(){
   if(typeof(initPluginUIView) != "undefined"){
@@ -142,14 +123,59 @@ function loadPluginUIContextIfAvailable(){
   }
 }
 
+function renderNodeJoinInstructionLayout(instructions){
+  const container = document.getElementById("nodeJoinInstructions");
+  const template = document.getElementById("nodeJoinInstructionTemplate");
+  if (!container || !template){
+    return;
+  }
+
+  container.innerHTML = "";
+  (Array.isArray(instructions) ? instructions : []).forEach(function(instruction){
+    const fragment = template.content.cloneNode(true);
+    const title = fragment.querySelector(".nodeJoinInstructionTitle");
+    const body = fragment.querySelector(".nodeJoinInstructionBody");
+    if (title){
+      title.textContent = instruction.title || "Join instructions";
+    }
+    if (body){
+      body.id = instruction.id || "";
+      body.textContent = instruction.content || "";
+    }
+    container.appendChild(fragment);
+  });
+}
+
+function renderNodeJoinInstructionError(message){
+  renderNodeJoinInstructionLayout([
+    {
+      id: "nodeJoinInstructionError",
+      title: "Join instructions unavailable",
+      content: message
+    }
+  ]);
+  $(".joininfo").show();
+}
+
+function loadNodeJoinInstructions(nodeId){
+  return $.ajax({
+    url: NODE_JOIN_TEMPLATES_API,
+    dataType: "json",
+    cache: false,
+    data: { id: nodeId }
+  });
+}
+
 function loadNodeFleetSettings(){
   $.get("/api/nodes/settings", function(data){
     if (!data || data.mode !== "primary"){
       $(".advanceoptions").hide();
+      $("#dynamicNodeEnrollmentBox").hide();
       return;
     }
     nodeFleetSettings = data || {};
     $(".advanceoptions").show();
+    $("#dynamicNodeEnrollmentBox").show();
     if (data && data.sync_interval_seconds){
       $("#nodeSyncIntervalSeconds").val(data.sync_interval_seconds);
     }
@@ -160,6 +186,7 @@ function loadNodeFleetSettings(){
     $("#requireNodeVersionMatchCheckbox").checkbox(data && data.require_version_match ? "set checked" : "set unchecked");
     $("#nodeDockerImage").val(data && data.docker_image ? data.docker_image : "");
     updateNodeDockerImageHint(data);
+    updateDynamicEnrollmentCommand();
   });
 }
 
@@ -217,19 +244,17 @@ function initiateNodeList(){
 
     data.forEach(node => {
         const displayName = escapeNodeValue(node.display_name || node.name || node.host || node.id);
-        const hostInfo = [node.host || "-", node.last_ip || "-"].join(" / ");
-        const lastSeen = formatNodeDate(node.last_seen, "Never");
-        const enabledLabel = node.enabled ? '<span class="ui green tiny label">Enabled</span>' : '<span class="ui grey tiny label">Disabled</span>';
+        const reportedIP = node.last_ip || node.request_ip || "-";
+        const hostInfo = [node.host || "-", reportedIP].join(" / ");
+        const isPending = isNodePendingApproval(node);
+        const lastSeen = formatNodeDate(node.last_seen, isPending ? "Waiting for approval" : "Never");
+        const enabledLabel = isPending
+          ? '<span class="ui yellow tiny label">Pending</span>'
+          : (node.enabled ? '<span class="ui green tiny label">Enabled</span>' : '<span class="ui grey tiny label">Disabled</span>');
         const statusLabel = renderNodeStatusBadge(node);
         const versionLabel = node.version_mismatch
           ? `<div style="margin-top:0.35em;"><span class="ui red tiny label">Version mismatch</span><br><small>v${escapeNodeValue(node.zoraxy_version || "unknown")}</small></div>`
           : `<div style="margin-top:0.35em;"><small>v${escapeNodeValue(node.zoraxy_version || "unknown")}</small></div>`;
-        const adminDisabled = node.admin_url ? "" : "disabled";
-        const nodeIDJS = JSON.stringify(node.id || "");
-        const displayNameJS = JSON.stringify(node.display_name || node.name || node.host || node.id || "");
-        const hostJS = JSON.stringify(node.host || "");
-        const adminURLJS = JSON.stringify(node.admin_url || "");
-        const nextEnabledJS = node.enabled ? "false" : "true";
       const row = `
         <tr>
           <td data-label="NodeID">${node.id}</td>
@@ -238,24 +263,8 @@ function initiateNodeList(){
           <td data-label="RegisteredAt">${formatNodeDate(node.registered_at, "Pending")}</td>
           <td data-label="LastSeen">${lastSeen}</td>
           <td data-label="Enabled">${enabledLabel}</td>
-          <td data-label="State">${statusLabel}${node.version_mismatch ? '<div style="margin-top:0.35em;"><span class="ui red tiny label">Sync blocked</span></div>' : ''}</td>
-          <td data-label="Action">
-             <button onclick='showNodeInfo(${nodeIDJS}, this);' class="ui basic icon button" nodeid="${node.id}" title="Show node info">
-              <i class="info circle icon"></i>
-            </button>
-            <button onclick='openNodeAdmin(${adminURLJS});' class="ui basic icon button" title="Open admin panel" ${adminDisabled}>
-              <i class="external alternate icon"></i>
-            </button>
-            <button onclick='toggleNodeEnabled(${nodeIDJS}, ${nextEnabledJS}, ${displayNameJS}, this);' class="ui basic icon button" title="${node.enabled ? "Disable node" : "Enable node"}">
-              <i class="${node.enabled ? "pause" : "play"} icon"></i>
-            </button>
-            <button onclick='rotateNodeToken(${nodeIDJS}, ${hostJS}, this);' class="ui basic icon button" title="Rotate token">
-              <i class="key icon"></i>
-            </button>
-            <button onclick='removeNode(${nodeIDJS}, ${displayNameJS}, this);' class="ui basic red icon button">
-              <i class="trash icon"></i>
-            </button>
-          </td>
+          <td data-label="State">${statusLabel}${(!isPending && node.version_mismatch) ? '<div style="margin-top:0.35em;"><span class="ui red tiny label">Sync blocked</span></div>' : ''}</td>
+          <td data-label="Action">${buildNodeActionButtons(node)}</td>
         </tr>
       `;
         $("#nodeTable").append(row);
@@ -284,7 +293,7 @@ function loadNodeFleetSummary(){
     }
 
     $("#nodeFleetSummaryText").html(
-      `Registered: <b>${data.total_nodes}</b>, online: <b>${data.online_nodes}</b>, enabled: <b>${data.enabled_nodes}</b><br>` +
+      `Registered: <b>${data.total_nodes}</b>, pending approval: <b>${data.pending_nodes || 0}</b>, online: <b>${data.online_nodes}</b>, enabled: <b>${data.enabled_nodes}</b><br>` +
       `Today requests: <b>${abbreviateNumber(data.today_total)}</b> ` +
       `(<span style="color:#2e7d32;">${abbreviateNumber(data.today_valid)}</span> ok / ` +
       `<span style="color:#c62828;">${abbreviateNumber(data.today_error)}</span> err), ` +
@@ -316,6 +325,7 @@ setInterval(initiateNodeList, 5000);
 loadNodeFleetSettings();
 loadNodeFleetSummary();
 setInterval(loadNodeFleetSummary, 10000);
+updateDynamicEnrollmentCommand();
 
 function escapeNodeValue(value, fallback = "-"){
     if (value === undefined || value === null || value === ""){
@@ -341,14 +351,39 @@ function getPrimaryNodeBaseURL(){
     return document.location.protocol + "//" + document.location.hostname + ":" + document.location.port;
 }
 
+function updateDynamicEnrollmentCommand(){
+    $.ajax({
+        url: NODE_JOIN_TEMPLATES_API,
+        dataType: "json",
+        cache: false,
+        data: { name: "dynamic_request" }
+    }).done(function(data){
+        $("#dynamicNodeEnrollmentCommand").text(data && data.content ? data.content : "");
+    }).fail(function(){
+        $("#dynamicNodeEnrollmentCommand").text(
+            `curl -sS -X POST ${getPrimaryNodeBaseURL()}/node/api/request \\\n` +
+            `  -d "hostname=$(hostname)" \\\n` +
+            `  -d "name=$(hostname)" \\\n` +
+            `  -d "management_port=8000"`
+        );
+    });
+}
+
+function isNodePendingApproval(node){
+    return !!(node && node.approval_status === "pending");
+}
+
 function renderNodeInfo(data){
     const displayName = escapeNodeValue(data.display_name || data.name || data.host, "Pending first heartbeat");
     const host = escapeNodeValue(data.host, "Pending first heartbeat");
-    const lastIP = escapeNodeValue(data.last_ip, "Unknown");
+    const lastIP = escapeNodeValue(data.last_ip || data.request_ip, "Unknown");
     const adminURL = data.admin_url ? `<a href="${encodeURI(data.admin_url)}" target="_blank">${escapeNodeValue(data.admin_url)}</a>` : "Unavailable";
-    const enabled = data.enabled ? "Enabled" : "Disabled";
-    const status = data.local_override ? "Local override" : (data.online ? "Online" : "Offline");
+    const isPending = isNodePendingApproval(data);
+    const enabled = isPending ? "Pending approval" : (data.enabled ? "Enabled" : "Disabled");
+    const status = isPending ? "Pending approval" : (data.local_override ? "Local override" : (data.online ? "Online" : "Offline"));
+    const approval = isPending ? "Pending approval" : "Approved";
     const registeredAt = escapeNodeValue(formatNodeDate(data.registered_at, "Pending"));
+    const approvedAt = escapeNodeValue(formatNodeDate(data.approved_at, "Not approved yet"));
     const lastSeen = escapeNodeValue(formatNodeDate(data.last_seen, "Never"));
     const version = escapeNodeValue(data.zoraxy_version, "Unknown");
     const configVersion = escapeNodeValue(data.config_version, "Pending sync");
@@ -370,6 +405,8 @@ function renderNodeInfo(data){
         Admin panel: ${adminURL}<br>
         Enabled: ${enabled}<br>
         Status: ${status}<br>
+        Approval: ${approval}<br>
+        Approved at: ${approvedAt}<br>
         Local override: ${data.local_override ? "Enabled" : "Disabled"}<br>
         Registered: ${registeredAt}<br>
         Last seen: ${lastSeen}<br>
@@ -393,6 +430,9 @@ function openNodeAdmin(adminURL){
 }
 
 function renderNodeStatusBadge(node){
+    if (isNodePendingApproval(node)){
+        return '<span class="ui yellow label">Pending Approval</span>';
+    }
     if (node && node.local_override && node.online){
         return '<span class="ui orange label">Local Override</span>';
     }
@@ -400,6 +440,46 @@ function renderNodeStatusBadge(node){
         return '<span class="ui green label">Online</span>';
     }
     return '<span class="ui red label">Offline</span>';
+}
+
+function buildNodeActionButtons(node){
+    const nodeIDJS = JSON.stringify(node.id || "");
+    const displayNameJS = JSON.stringify(node.display_name || node.name || node.host || node.id || "");
+    const hostJS = JSON.stringify(node.host || "");
+    const adminURLJS = JSON.stringify(node.admin_url || "");
+    const infoButton = `
+      <button onclick='showNodeInfo(${nodeIDJS}, this);' class="ui basic icon button" nodeid="${escapeNodeValue(node.id || "")}" title="Show node info">
+        <i class="info circle icon"></i>
+      </button>
+    `;
+
+    if (isNodePendingApproval(node)){
+        return infoButton + `
+          <button onclick='approveNode(${nodeIDJS}, ${displayNameJS}, this);' class="ui basic green icon button" title="Approve node">
+            <i class="check icon"></i>
+          </button>
+          <button onclick='removeNode(${nodeIDJS}, ${displayNameJS}, this);' class="ui basic red icon button" title="Reject request">
+            <i class="ban icon"></i>
+          </button>
+        `;
+    }
+
+    const nextEnabledJS = node.enabled ? "false" : "true";
+    const adminDisabled = node.admin_url ? "" : "disabled";
+    return infoButton + `
+      <button onclick='openNodeAdmin(${adminURLJS});' class="ui basic icon button" title="Open admin panel" ${adminDisabled}>
+        <i class="external alternate icon"></i>
+      </button>
+      <button onclick='toggleNodeEnabled(${nodeIDJS}, ${nextEnabledJS}, ${displayNameJS}, this);' class="ui basic icon button" title="${node.enabled ? "Disable node" : "Enable node"}">
+        <i class="${node.enabled ? "pause" : "play"} icon"></i>
+      </button>
+      <button onclick='rotateNodeToken(${nodeIDJS}, ${hostJS}, this);' class="ui basic icon button" title="Rotate token">
+        <i class="key icon"></i>
+      </button>
+      <button onclick='removeNode(${nodeIDJS}, ${displayNameJS}, this);' class="ui basic red icon button">
+        <i class="trash icon"></i>
+      </button>
+    `;
 }
 
 
@@ -425,46 +505,44 @@ function removeNode(nodeId, nodeName, btn=undefined) {
       }
   }
 
+function approveNode(nodeId, nodeName, btn=undefined){
+    if (!confirm("Approve node registration for " + nodeName + "?")){
+        return;
+    }
+
+    if (btn){
+        $(btn).addClass("loading disabled");
+    }
+
+    $.cjax({
+        url: '/api/nodes/approve',
+        type: 'POST',
+        data: { id: nodeId },
+        success: function(data) {
+            if (data.error != undefined) {
+                msgbox(data.error, false);
+                return;
+            }
+
+            msgbox("Node approved");
+            initiateNodeList();
+        },
+        error: function() {
+            msgbox("Failed to approve node", false);
+        },
+        complete: function() {
+            if (btn){
+                $(btn).removeClass("loading disabled");
+            }
+        }
+    });
+}
+
 function clearJoinInfo() {
     $(".joininfo").hide();
     $("#nodeInfoCard").hide();
     $("#nodeInfoDetails").html("");
-    $("#dockerJoinEnvCommand").html("");
-    $("#dockerJoinFlagCommand").html("");
-    $("#standaloneJoinEnvCommand").html("");
-    $("#standaloneJoinFlagCommand").html("");
-    $("#nodeIPJoinCommand").html("");
-}
-
-function shellEscapeSingleQuoted(value){
-    return "'" + String(value === undefined || value === null ? "" : value).replace(/'/g, "'\"'\"'") + "'";
-}
-
-function buildNodeJoinEnvironment(nodeData){
-    const env = {
-        ZORAXY_NODE_SERVER: getPrimaryNodeBaseURL(),
-        ZORAXY_NODE_TOKEN: nodeData && nodeData.token ? nodeData.token : ""
-    };
-    const displayName = (nodeData && (nodeData.name || nodeData.display_name)) ? String(nodeData.name || nodeData.display_name).trim() : "";
-    if (displayName !== ""){
-        env.ZORAXY_NODE_NAME = displayName;
-    }
-    return env;
-}
-
-function buildNodeJoinFlagArguments(nodeData){
-    const args = [
-        "-server " + shellEscapeSingleQuoted(getPrimaryNodeBaseURL()),
-        "-token " + shellEscapeSingleQuoted(nodeData && nodeData.token ? nodeData.token : "")
-    ];
-    return args.join(" ");
-}
-
-function buildOptionalNodeNameEnvironmentPrefix(joinEnv){
-    if (!joinEnv || !joinEnv.ZORAXY_NODE_NAME){
-        return "";
-    }
-    return `ZORAXY_NODE_NAME=${shellEscapeSingleQuoted(joinEnv.ZORAXY_NODE_NAME)} `;
+    $("#nodeJoinInstructions").html("");
 }
 
 function updateNodeDockerImageHint(data){
@@ -486,36 +564,13 @@ function updateNodeDockerImageHint(data){
 function showJoinInfo(data) {
     clearJoinInfo();
     renderNodeInfo(data);
-    const joinEnv = buildNodeJoinEnvironment(data);
-    const dockerImage = (nodeFleetSettings && nodeFleetSettings.docker_image) ? nodeFleetSettings.docker_image : "zoraxydocker/zoraxy:latest";
-    const envKeys = Object.keys(joinEnv);
-    const flagArguments = buildNodeJoinFlagArguments(data);
-    const nodeNamePrefix = buildOptionalNodeNameEnvironmentPrefix(joinEnv);
-
-    const standaloneEnvLines = envKeys.map(key => `${key}=${shellEscapeSingleQuoted(joinEnv[key])} \\`);
-    standaloneEnvLines.push("zoraxy");
-
-    const dockerEnvLines = ["docker run --network=host \\"];
-    envKeys.forEach(key => {
-        dockerEnvLines.push(`  -e ${key}=${shellEscapeSingleQuoted(joinEnv[key])} \\`);
+    loadNodeJoinInstructions(data.id).done(function(response){
+        renderNodeJoinInstructionLayout(response && Array.isArray(response.instructions) ? response.instructions : []);
+        $(".joininfo").show();
+    }).fail(function(xhr){
+        const errorMessage = xhr.responseJSON && xhr.responseJSON.error ? xhr.responseJSON.error : "Failed to load node join instructions";
+        renderNodeJoinInstructionError(errorMessage);
     });
-    dockerEnvLines.push(`  ${dockerImage}`);
-
-    const dockerFlagLines = ["docker run --network=host \\"];
-    if (joinEnv.ZORAXY_NODE_NAME){
-        dockerFlagLines.push(`  -e ZORAXY_NODE_NAME=${shellEscapeSingleQuoted(joinEnv.ZORAXY_NODE_NAME)} \\`);
-    }
-    dockerFlagLines.push(`  ${dockerImage} ${flagArguments}`);
-
-    $("#dockerJoinEnvCommand").text(dockerEnvLines.join("\n"));
-    $("#dockerJoinFlagCommand").text(dockerFlagLines.join("\n"));
-    $("#standaloneJoinEnvCommand").text(standaloneEnvLines.join("\n"));
-    $("#standaloneJoinFlagCommand").text(`${nodeNamePrefix}zoraxy ${flagArguments}`.trim());
-    $("#nodeIPJoinCommand").text(
-        `ENV:\nZORAXY_NODE_IP=${shellEscapeSingleQuoted("192.0.2.10")} zoraxy\n\n` +
-        `Flags:\nzoraxy ${flagArguments} -nodeIP ${shellEscapeSingleQuoted("192.0.2.10")}`
-    );
-    $(".joininfo").show();
 }
 
 function toggleNodeEnabled(nodeId, enabled, nodeName, btn=undefined){

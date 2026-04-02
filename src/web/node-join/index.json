@@ -1,0 +1,32 @@
+{
+  "dynamic_request": {
+    "path": "/node-join/dynamic-request.sh"
+  },
+  "instructions": [
+    {
+      "id": "dockerJoinEnvCommand",
+      "title": "Docker instructions (ENV)",
+      "path": "/node-join/docker-env.sh"
+    },
+    {
+      "id": "dockerComposeJoinCommand",
+      "title": "Docker Compose",
+      "path": "/node-join/docker-compose.yaml"
+    },
+    {
+      "id": "standaloneJoinEnvCommand",
+      "title": "Standalone instructions (ENV)",
+      "path": "/node-join/standalone-env.sh"
+    },
+    {
+      "id": "standaloneJoinFlagCommand",
+      "title": "Standalone instructions (flags)",
+      "path": "/node-join/standalone-flags.sh"
+    },
+    {
+      "id": "nodeIPJoinCommand",
+      "title": "Optional advertised IP override",
+      "path": "/node-join/optional-node-ip.txt"
+    }
+  ]
+}

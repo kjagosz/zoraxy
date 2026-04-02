@@ -1,0 +1,19 @@
+services:
+  zoraxy:
+    image: {{.docker_image}}
+    container_name: zoraxy
+    hostname: zoraxy.docker
+    restart: always
+    network_mode: host
+    volumes:
+      - zoraxy-config:/opt/zoraxy/config/
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      ZORAXY_NODE_SERVER: {{yamlquote .node_server}}
+      ZORAXY_NODE_TOKEN: {{yamlquote .node_token}}
+{{- with .node_name}}
+      ZORAXY_NODE_NAME: {{yamlquote .}}
+{{end}}      FASTGEOIP: "true"
+volumes:
+  zoraxy-config:
+    driver: local

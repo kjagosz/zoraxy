@@ -45,6 +45,18 @@ func getNodeAdminURL(targetNode *Node) string {
 	return "http://" + net.JoinHostPort(host, port)
 }
 
+func getNodeReportedIP(targetNode *Node) string {
+	if targetNode == nil {
+		return ""
+	}
+
+	if strings.TrimSpace(targetNode.LastIP) != "" {
+		return strings.TrimSpace(targetNode.LastIP)
+	}
+
+	return strings.TrimSpace(targetNode.RequestIP)
+}
+
 func getRemoteNodeIP(r *http.Request) string {
 	if r == nil {
 		return ""
@@ -75,9 +87,13 @@ func (m *Manager) HandleListNodes(w http.ResponseWriter, r *http.Request) {
 		DisplayName         string `json:"display_name"`
 		Host                string `json:"host"`
 		LastIP              string `json:"last_ip,omitempty"`
+		RequestIP           string `json:"request_ip,omitempty"`
 		ManagementPort      string `json:"management_port,omitempty"`
 		AdminURL            string `json:"admin_url,omitempty"`
 		Enabled             bool   `json:"enabled"`
+		Approved            bool   `json:"approved"`
+		ApprovalStatus      string `json:"approval_status"`
+		ApprovedAt          string `json:"approved_at,omitempty"`
 		LocalOverride       bool   `json:"local_override"`
 		Online              bool   `json:"online"`
 		Status              string `json:"status"`
@@ -98,9 +114,15 @@ func (m *Manager) HandleListNodes(w http.ResponseWriter, r *http.Request) {
 		if !Node.LastSeen.IsZero() {
 			lastSeen = Node.LastSeen.Format("2006-01-02 15:04:05")
 		}
+		approvedAt := ""
+		if !Node.ApprovedAt.IsZero() {
+			approvedAt = Node.ApprovedAt.Format("2006-01-02 15:04:05")
+		}
 		online := m.IsNodeOnline(Node)
 		status := "offline"
-		if online && Node.LocalOverride {
+		if Node.IsPendingApproval() {
+			status = "pending_approval"
+		} else if online && Node.LocalOverride {
 			status = "local_override"
 		} else if online {
 			status = "online"
@@ -111,10 +133,14 @@ func (m *Manager) HandleListNodes(w http.ResponseWriter, r *http.Request) {
 			Name:                Node.Name,
 			DisplayName:         getNodeDisplayName(Node),
 			Host:                Node.Host,
-			LastIP:              Node.LastIP,
+			LastIP:              getNodeReportedIP(Node),
+			RequestIP:           Node.RequestIP,
 			ManagementPort:      Node.ManagementPort,
 			AdminURL:            getNodeAdminURL(Node),
 			Enabled:             Node.Enabled,
+			Approved:            Node.IsApproved(),
+			ApprovalStatus:      Node.ApprovalState(),
+			ApprovedAt:          approvedAt,
 			LocalOverride:       Node.LocalOverride,
 			Online:              online,
 			Status:              status,
@@ -163,6 +189,96 @@ func (m *Manager) HandleRegisterNode(w http.ResponseWriter, r *http.Request) {
 	utils.SendJSONResponse(w, string(response))
 }
 
+func (m *Manager) HandleRequestNodeRegistration(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if m == nil || m.Options == nil || !strings.EqualFold(m.Options.Mode, "primary") {
+		http.Error(w, "Dynamic node registration is only available on the primary node", http.StatusServiceUnavailable)
+		return
+	}
+
+	name := strings.TrimSpace(r.URL.Query().Get("name"))
+	if nodeName := strings.TrimSpace(r.URL.Query().Get("node_name")); nodeName != "" {
+		name = nodeName
+	}
+	hostname := strings.TrimSpace(r.URL.Query().Get("hostname"))
+	managementPort := strings.TrimSpace(r.URL.Query().Get("management_port"))
+
+	if r.Method == http.MethodPost {
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if postName := strings.TrimSpace(r.PostForm.Get("name")); postName != "" {
+			name = postName
+		}
+		if postNodeName := strings.TrimSpace(r.PostForm.Get("node_name")); postNodeName != "" {
+			name = postNodeName
+		}
+		if postHostname := strings.TrimSpace(r.PostForm.Get("hostname")); postHostname != "" {
+			hostname = postHostname
+		}
+		if postPort := strings.TrimSpace(r.PostForm.Get("management_port")); postPort != "" {
+			managementPort = postPort
+		}
+	}
+
+	pendingNode, err := m.GenerateDynamicJoinRequest(name, hostname, managementPort, getRemoteNodeIP(r))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	if forwardedProto := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")); forwardedProto != "" {
+		scheme = strings.TrimSpace(strings.Split(forwardedProto, ",")[0])
+	}
+
+	var instructions []*JoinInstruction
+	if m != nil && m.Options != nil && m.Options.BuildJoinInstructions != nil {
+		instructions, err = m.Options.BuildJoinInstructions(r, pendingNode)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	response, err := json.Marshal(struct {
+		ID             string             `json:"id"`
+		Name           string             `json:"name,omitempty"`
+		Host           string             `json:"host,omitempty"`
+		RequestIP      string             `json:"request_ip,omitempty"`
+		ManagementPort string             `json:"management_port,omitempty"`
+		Token          string             `json:"token"`
+		Server         string             `json:"server,omitempty"`
+		ApprovalStatus string             `json:"approval_status"`
+		Approved       bool               `json:"approved"`
+		Instructions   []*JoinInstruction `json:"instructions,omitempty"`
+	}{
+		ID:             pendingNode.ID,
+		Name:           pendingNode.Name,
+		Host:           pendingNode.Host,
+		RequestIP:      pendingNode.RequestIP,
+		ManagementPort: pendingNode.ManagementPort,
+		Token:          pendingNode.Token,
+		Server:         strings.TrimRight(scheme+"://"+r.Host, "/"),
+		ApprovalStatus: pendingNode.ApprovalState(),
+		Approved:       pendingNode.IsApproved(),
+		Instructions:   instructions,
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	utils.SendJSONResponse(w, string(response))
+}
+
 func (m *Manager) HandleGetNodeInfo(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -188,17 +304,26 @@ func (m *Manager) HandleGetNodeInfo(w http.ResponseWriter, r *http.Request) {
 	}
 	online := m.IsNodeOnline(targetNode)
 	status := "offline"
-	if online && targetNode.LocalOverride {
+	if targetNode.IsPendingApproval() {
+		status = "pending_approval"
+	} else if online && targetNode.LocalOverride {
 		status = "local_override"
 	} else if online {
 		status = "online"
 	}
 	versionMismatch, versionMessage := m.GetNodeVersionMismatch(targetNode)
+	approvedAt := ""
+	if !targetNode.ApprovedAt.IsZero() {
+		approvedAt = targetNode.ApprovedAt.Format("2006-01-02 15:04:05")
+	}
 
 	response, err := json.Marshal(struct {
 		*Node
 		DisplayName          string             `json:"display_name"`
 		AdminURL             string             `json:"admin_url,omitempty"`
+		Approved             bool               `json:"approved"`
+		ApprovalStatus       string             `json:"approval_status"`
+		ApprovedAt           string             `json:"approved_at,omitempty"`
 		Online               bool               `json:"online"`
 		Status               string             `json:"status"`
 		LocalOverride        bool               `json:"local_override"`
@@ -212,6 +337,9 @@ func (m *Manager) HandleGetNodeInfo(w http.ResponseWriter, r *http.Request) {
 		Node:                 targetNode,
 		DisplayName:          getNodeDisplayName(targetNode),
 		AdminURL:             getNodeAdminURL(targetNode),
+		Approved:             targetNode.IsApproved(),
+		ApprovalStatus:       targetNode.ApprovalState(),
+		ApprovedAt:           approvedAt,
 		Online:               online,
 		Status:               status,
 		LocalOverride:        targetNode.LocalOverride,
@@ -221,6 +349,58 @@ func (m *Manager) HandleGetNodeInfo(w http.ResponseWriter, r *http.Request) {
 		VersionMismatchError: versionMessage,
 		Telemetry:            telemetry,
 		TelemetryOverview:    BuildTelemetryOverview(telemetry),
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	utils.SendJSONResponse(w, string(response))
+}
+
+func (m *Manager) HandleApproveNode(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if m == nil || m.Options == nil || !strings.EqualFold(m.Options.Mode, "primary") {
+		http.Error(w, "Node approval is only available on the primary node", http.StatusServiceUnavailable)
+		return
+	}
+
+	idStr, err := utils.PostPara(r, "id")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		http.Error(w, fmt.Errorf("failed to parse token: %v", err).Error(), http.StatusBadRequest)
+		return
+	}
+
+	targetNode, err := m.GetNodeByID(id.String())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if err := m.ApproveNode(targetNode); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	response, err := json.Marshal(struct {
+		ID             string `json:"id"`
+		Approved       bool   `json:"approved"`
+		ApprovalStatus string `json:"approval_status"`
+		ApprovedAt     string `json:"approved_at,omitempty"`
+	}{
+		ID:             targetNode.ID,
+		Approved:       targetNode.IsApproved(),
+		ApprovalStatus: targetNode.ApprovalState(),
+		ApprovedAt:     targetNode.ApprovedAt.Format("2006-01-02 15:04:05"),
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -375,6 +555,7 @@ func (m *Manager) HandleNodeUpdate(node *Node, w http.ResponseWriter, r *http.Re
 	} else {
 		node.LastIP = getRemoteNodeIP(r)
 	}
+	node.RequestIP = ""
 
 	zoraxyVersion, err := utils.PostPara(r, "zoraxy_version")
 	if err == nil {

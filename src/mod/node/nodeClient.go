@@ -3,6 +3,7 @@ package node
 import (
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -105,7 +106,14 @@ func (c *NodeClient) doJSON(method string, path string, body io.Reader, contentT
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("node request failed: %s", strings.TrimSpace(string(respBody)))
+		message := strings.TrimSpace(string(respBody))
+		if message == ErrNodeApprovalPending.Error() {
+			return ErrNodeApprovalPending
+		}
+		if message == "" {
+			return fmt.Errorf("node request failed: status %d", resp.StatusCode)
+		}
+		return fmt.Errorf("node request failed: %s", message)
 	}
 
 	if target == nil {
@@ -113,6 +121,10 @@ func (c *NodeClient) doJSON(method string, path string, body io.Reader, contentT
 	}
 
 	return json.NewDecoder(resp.Body).Decode(target)
+}
+
+func IsPendingApprovalError(err error) bool {
+	return errors.Is(err, ErrNodeApprovalPending)
 }
 
 func (c *NodeClient) UpdateNodeInfo(path string, hostname string, nodeName string, nodeIP string, managementPort string, zoraxyVersion string, configVersion string, localOverride bool, streamRuntime map[string]*StreamProxyRuntime) error {

@@ -856,6 +856,9 @@ func bootstrapNodeSync() error {
 	if err != nil {
 		syncStatus.LastError = err.Error()
 		_ = node.SaveSyncStatus(statusFile, syncStatus)
+		if node.IsPendingApprovalError(err) {
+			return nil
+		}
 		if syncStatus.HasPreviousSync {
 			return nil
 		}
@@ -1227,6 +1230,9 @@ func resolveNodeSyncState(status *node.SyncStatus) string {
 	if status.LocalOverride {
 		return "local_override"
 	}
+	if isNodeApprovalPendingError(status.LastError) {
+		return "approval_pending"
+	}
 	if isPrimaryUnreachableSyncError(status.LastError) {
 		return "primary_unreachable"
 	}
@@ -1268,6 +1274,10 @@ func isPrimaryUnreachableSyncError(message string) bool {
 	}
 
 	return false
+}
+
+func isNodeApprovalPendingError(message string) bool {
+	return strings.Contains(strings.ToLower(strings.TrimSpace(message)), strings.ToLower(node.ErrNodeApprovalPending.Error()))
 }
 
 func formatNodeSyncTime(value time.Time) string {

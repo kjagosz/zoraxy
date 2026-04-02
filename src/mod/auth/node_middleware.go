@@ -57,15 +57,19 @@ func (m *NodeAuthMiddleware) HandleAuthCheck(w http.ResponseWriter, r *http.Requ
 	apiKey := strings.TrimPrefix(authHeader, "Bearer ")
 
 	// Validate the API key for this endpoint
-	node, err := m.option.NodeManager.GetNodeByToken(apiKey)
+	targetNode, err := m.option.NodeManager.GetNodeByToken(apiKey)
 	if err != nil {
+		if errors.Is(err, node.ErrNodeApprovalPending) {
+			http.Error(w, err.Error(), http.StatusForbidden)
+			return
+		}
 		// Invalid API key or endpoint not permitted
 		m.option.DeniedHandler(w, r)
 		return
 	}
 
 	// Call the original handler
-	handler(node, w, r)
+	handler(targetNode, w, r)
 }
 
 // wraps an HTTP handler with plugin authentication middleware

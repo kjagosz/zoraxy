@@ -19,8 +19,10 @@ func RegisterNodeAPIs(authRouter *auth.NodeAuthMiddleware, publicRouter *http.Se
 	// management api for authorized users
 	publicRouter.HandleFunc("/api/nodes/unregister", nodeManager.HandleUnregisterNode)
 	publicRouter.HandleFunc("/api/nodes/register", nodeManager.HandleRegisterNode)
+	publicRouter.HandleFunc("/api/nodes/approve", nodeManager.HandleApproveNode)
 	publicRouter.HandleFunc("/api/nodes/list", nodeManager.HandleListNodes)
 	publicRouter.HandleFunc("/api/nodes/info", nodeManager.HandleGetNodeInfo)
+	publicRouter.HandleFunc("/api/nodes/join/templates", HandleNodeJoinTemplates)
 	publicRouter.HandleFunc("/api/nodes/summary", nodeManager.HandleGetTelemetrySummary)
 	publicRouter.HandleFunc("/api/nodes/rotateToken", nodeManager.HandleRotateNodeToken)
 	publicRouter.HandleFunc("/api/nodes/setEnabled", nodeManager.HandleSetNodeEnabled)
@@ -38,5 +40,6 @@ func initNodeAPI(targetMux *http.ServeMux, mux *http.ServeMux) {
 		},
 	)
 
+	targetMux.HandleFunc("/node/api/request", nodeManager.HandleRequestNodeRegistration)
 	RegisterNodeAPIs(authMiddleware, mux)
 }

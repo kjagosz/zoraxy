@@ -50,6 +50,7 @@ type TelemetrySummary struct {
 	PrimaryVersion       string    `json:"primary_version,omitempty"`
 	RequireVersionMatch  bool      `json:"require_version_match"`
 	TotalNodes           int       `json:"total_nodes"`
+	PendingNodes         int       `json:"pending_nodes"`
 	EnabledNodes         int       `json:"enabled_nodes"`
 	OnlineNodes          int       `json:"online_nodes"`
 	LocalOverrideNodes   int       `json:"local_override_nodes"`
@@ -364,6 +365,11 @@ func (m *Manager) BuildTelemetrySummary() (*TelemetrySummary, error) {
 	summary.TotalNodes = len(m.Nodes)
 	for _, currentNode := range m.Nodes {
 		if currentNode == nil {
+			continue
+		}
+
+		if currentNode.IsPendingApproval() {
+			summary.PendingNodes++
 			continue
 		}
 

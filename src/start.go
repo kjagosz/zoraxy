@@ -160,6 +160,11 @@ func startupSequence() {
 		ExportSystemData:          exportNodeSystemData,
 		ExportSystemDataForNode:   exportNodeSystemDataForNode,
 		ImportSystemData:          importNodeSystemData,
+		BuildJoinInstructions: func(r *http.Request, targetNode *node.Node) ([]*node.JoinInstruction, error) {
+			return renderNodeJoinInstructions(r, targetNode, map[string]struct{}{
+				nodeJoinOptionalIPCommandID: {},
+			})
+		},
 	})
 	if err != nil {
 		panic(err)

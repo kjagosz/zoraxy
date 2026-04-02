@@ -1,0 +1,5 @@
+ENV:
+ZORAXY_NODE_IP={{shellquote .node_ip_example}} zoraxy
+
+Flags:
+zoraxy -server {{shellquote .node_server}} -token {{shellquote .node_token}} -nodeIP {{shellquote .node_ip_example}}
